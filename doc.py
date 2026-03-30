@@ -1,37 +1,36 @@
-from fastapi import FastAPI, Request
-from fastapi.responses import JSONResponse
-from docx import Document
+from fastapi import FastAPI, UploadFile, File, HTTPException
+from fastapi.responses import StreamingResponse
+from html2docx import html2docx
 import io
-import base64
 
 app = FastAPI()
 
-@app.post("/generate-doc")
-async def generate_doc(request: Request):
+
+@app.post("/convert-html-to-docx")
+async def convert_html_to_docx(file: UploadFile = File(...)):
     try:
-        data = await request.json()
-        text_content = data.get("text", "")
+        # Validate file type
+        if not file.filename.endswith(".html"):
+            raise HTTPException(status_code=400, detail="Only HTML files are allowed")
 
-        # Create document in memory
-        doc = Document()
-        doc.add_heading("Generated Document", 0)
-        doc.add_paragraph(text_content)
+        # Read HTML content
+        html_content = await file.read()
+        html_string = html_content.decode("utf-8")
 
-        buffer = io.BytesIO()
-        doc.save(buffer)
-        buffer.seek(0)
+        # Convert HTML → DOCX
+        docx_bytes = html2docx(html_string)
 
-        file_bytes = buffer.read()
-        encoded = base64.b64encode(file_bytes).decode("utf-8")
+        # Convert to stream
+        file_stream = io.BytesIO(docx_bytes)
 
-        return JSONResponse({
-            "fileName": "response.docx",
-            "fileContent": encoded,
-            "mimeType": "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-        })
+        # Return as downloadable file
+        return StreamingResponse(
+            file_stream,
+            media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            headers={
+                "Content-Disposition": f"attachment; filename=converted.docx"
+            }
+        )
 
     except Exception as e:
-        return JSONResponse(
-            status_code=500,
-            content={"error": str(e)}
-        )
+        raise HTTPException(status_code=500, detail=str(e))
